@@ -5,15 +5,133 @@ import os
 from glob import glob
 import seaborn as sns
 from PIL import Image
-np.random.seed(42)
+
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+
 import keras
 from keras.utils import to_categorical
-#used to convert labels to one-hot encoding #from keras.utils.np_utils import
-to_categorical
 from keras.models import Sequential
-from keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPool2D,
-BatchNormalization
-from sklearn.model_selection import train_test_split
-from scipy import stats
-from sklearn.preprocessing import LabelEncoder
+from keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPool2D
+
+np.random.seed(42)
+
+
+
+
+# Load the HAM10000 metadata CSV
+skin_df = pd.read_csv('data/HAM10000_metadata.csv')
+
+# Encode the labels
+le = LabelEncoder()
+skin_df['label'] = le.fit_transform(skin_df["dx"])
+
+# Map image paths to dataset
+image_path = {os.path.splitext(os.path.basename(x))[0]: x for x in glob(os.path.join('data/', '*', '*.jpg'))}
+skin_df['path'] = skin_df['image_id'].map(image_path.get)
+
+# Load and preprocess images
+SIZE = 32
+skin_df['image'] = skin_df['path'].map(lambda x: np.asarray(Image.open(x).resize((SIZE, SIZE))))
+
+# Normalize image data
+X = np.asarray(skin_df['image'].tolist()) / 255.0
+Y = to_categorical(skin_df['label'], num_classes=7)
+
+
+
+
+# Resampling each class to balance the dataset
+from sklearn.utils import resample
+
+balanced_dataframes = []
+for label in skin_df['label'].unique():
+    df = skin_df[skin_df['label'] == label]
+    balanced_dataframes.append(resample(df, replace=True, n_samples=500, random_state=42))
+
+skin_df_balanced = pd.concat(balanced_dataframes)
+
+# Splitting the balanced dataset into training and test sets
+x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=0.25, random_state=42)
+
+
+
+
+model = Sequential()
+model.add(Conv2D(256, (3, 3), activation="relu", input_shape=(SIZE, SIZE, 3)))
+model.add(MaxPool2D(pool_size=(2, 2)))
+model.add(Dropout(0.3))
+
+model.add(Conv2D(128, (3, 3), activation='relu'))
+model.add(MaxPool2D(pool_size=(2, 2)))
+model.add(Dropout(0.3))
+
+model.add(Conv2D(64, (3, 3), activation='relu'))
+model.add(MaxPool2D(pool_size=(2, 2)))
+model.add(Dropout(0.3))
+
+model.add(Flatten())
+model.add(Dense(32))
+model.add(Dense(7, activation='softmax'))
+
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+
+
+history = model.fit(
+    x_train, y_train,
+    epochs=50,
+    batch_size=16,
+    validation_data=(x_test, y_test),
+    verbose=2
+)
+
+
+
+
+
+# Evaluate test accuracy
+score = model.evaluate(x_test, y_test)
+print('Test accuracy:', score[1])
+
+# Plot training and validation loss
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.legend()
+plt.title('Loss')
+plt.show()
+
+# Plot training and validation accuracy
+plt.plot(history.history['accuracy'], label='Training Accuracy')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+plt.legend()
+plt.title('Accuracy')
+plt.show()
+
+
+
+
+
+import tkinter as tk
+from tkinter import filedialog
+from PIL import Image, ImageTk
+
+def upload_diagnose_file():
+    global filename
+    filename = filedialog.askopenfilename(filetypes=[("Jpg Files", "*.jpg")])
+    img = Image.open(filename).resize((400, 200))
+    img = ImageTk.PhotoImage(img)
+    b2 = tk.Button(my_w, image=img)
+    b2.image = img
+    b2.place(x=450, y=320)
+
+# GUI setup
+my_w = tk.Tk()
+my_w.geometry("900x750")
+my_w.title("Skin Disease Diagnosis")
+
+b1 = tk.Button(my_w, text='Upload File', command=upload_diagnose_file)
+b1.place(x=20, y=50)
+
+my_w.mainloop()
